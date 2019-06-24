@@ -49,8 +49,12 @@ ENDIF()
 # See https://cmake.org/Bug/view.php?id=14695#c34953
 # Additionally, OSG_WINDOWING_SYSTEM is set here for OSX since its
 # value is needed to find the correct version of OpenGL (X11 or Cocoa).
-IF(APPLE AND NOT ANDROID)
 
+IF(ANDROID)
+    SET(OSG_WINDOWING_SYSTEM "None" CACHE STRING "Windowing system type for graphics window creation; options: None.")
+ELSEIF(WIN32)
+    SET(OSG_WINDOWING_SYSTEM "Win32" CACHE STRING "Windowing system type for graphics window creation; options: Win32 or None.")
+ELSEIF(APPLE)
     # custom option to flag an iOS build
     OPTION(OSG_BUILD_PLATFORM_IPHONE "Enable IPhoneSDK Device support" OFF)
 
@@ -77,11 +81,11 @@ IF(APPLE AND NOT ANDROID)
         SET(CMAKE_OSX_ARCHITECTURES "$(ARCHS_STANDARD)")
 
     ELSE()
-        # macOS >= 10.5 uses Cocoa windowing system, otherwise Carbon
-        IF(OSG_OSX_VERSION VERSION_GREATER_EQUAL 10.5)
-            SET(OSG_WINDOWING_SYSTEM "Cocoa" CACHE STRING "Windowing system type for graphics window creation, options Carbon, Cocoa or X11.")
+        # OSX >= 10.5 uses Cocoa windowing system, otherwise Carbon
+        IF(OSG_OSX_VERSION VERSION_LESS 10.5)
+            SET(OSG_WINDOWING_SYSTEM "Carbon" CACHE STRING "Windowing system type for graphics window creation; options: Carbon, Cocoa, X11 or None.")
         ELSE()
-            SET(OSG_WINDOWING_SYSTEM "Carbon" CACHE STRING "Windowing system type for graphics window creation, options Carbon, Cocoa or X11.")
+            SET(OSG_WINDOWING_SYSTEM "Cocoa" CACHE STRING "Windowing system type for graphics window creation; options: Carbon, Cocoa, X11 or None.")
         ENDIF()
 
         # Set macOS architectures for Universal Binaries.
@@ -112,6 +116,8 @@ IF(APPLE AND NOT ANDROID)
             MESSAGE(WARNING "OSX 10.3 and earlier not supported.")
         ENDIF()
     ENDIF()
+ELSE()
+    SET(OSG_WINDOWING_SYSTEM "X11" CACHE STRING "Windowing system type for graphics window creation; options: X11 or None.")
 ENDIF()
 
 PROJECT(OpenSceneGraph)
@@ -434,6 +440,9 @@ MARK_AS_ADVANCED(OSG_USE_FLOAT_BOUNDINGSPHERE)
 
 OPTION(OSG_USE_FLOAT_BOUNDINGBOX "Set to ON to build OpenSceneGraph with float BoundingBox instead of double." ON)
 MARK_AS_ADVANCED(OSG_USE_FLOAT_BOUNDINGBOX)
+
+OPTION(OSG_USE_FLOAT_QUAT "Set to ON to build OpenSceneGraph with float Quat instead of double." OFF)
+MARK_AS_ADVANCED(OSG_USE_FLOAT_QUAT)
 
 IF (WIN32)
     OPTION(OSG_USE_UTF8_FILENAME "Set to ON to use a UTF8 locale for filenames instead of the default locale." OFF)
@@ -873,14 +882,27 @@ IF(CYGWIN)
   SET(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -D_DEBUG")
 ENDIF()
 
-IF(UNIX AND NOT WIN32 AND NOT APPLE)
-  IF(CMAKE_SIZEOF_VOID_P MATCHES "8")
-      SET(LIB_POSTFIX "64" CACHE STRING "suffix for 32/64 dir placement")
-      MARK_AS_ADVANCED(LIB_POSTFIX)
+# Set OSG_INSTALL_LIBDIR to specify the installation directories of object code libraries
+IF(DEFINED LIB_POSTFIX)
+  # Use LIB_POSTFIX if defined
+  SET(OSG_INSTALL_LIBDIR lib${LIB_POSTFIX})
+ELSE()
+  IF(CMAKE_VERSION VERSION_LESS "2.8.5")
+    IF(UNIX AND NOT WIN32 AND NOT APPLE)
+      IF(CMAKE_SIZEOF_VOID_P MATCHES "8")
+        SET(LIB_POSTFIX "64" CACHE STRING "suffix for 32/64 dir placement")
+        MARK_AS_ADVANCED(LIB_POSTFIX)
+      ENDIF()
+    ENDIF()
+    IF(NOT DEFINED LIB_POSTFIX)
+      SET(LIB_POSTFIX "")
+    ENDIF()
+    SET(OSG_INSTALL_LIBDIR lib${LIB_POSTFIX})
+  ELSE()
+    # Use the GNU standard installation directories for CMake >= 2.8.5
+    INCLUDE(GNUInstallDirs)
+    SET(OSG_INSTALL_LIBDIR ${CMAKE_INSTALL_LIBDIR})
   ENDIF()
-ENDIF()
-IF(NOT DEFINED LIB_POSTFIX)
-    SET(LIB_POSTFIX "")
 ENDIF()
 
 # Set installation variables
@@ -890,8 +912,8 @@ IF(WIN32)
     SET(INSTALL_LIBDIR bin)
     SET(INSTALL_ARCHIVEDIR lib)
 ELSE()
-    SET(INSTALL_LIBDIR lib${LIB_POSTFIX})
-    SET(INSTALL_ARCHIVEDIR lib${LIB_POSTFIX})
+    SET(INSTALL_LIBDIR ${OSG_INSTALL_LIBDIR})
+    SET(INSTALL_ARCHIVEDIR ${OSG_INSTALL_LIBDIR})
 ENDIF()
 
 # If the version is equal to or greater than 2.8.8, then we can use the
@@ -910,7 +932,7 @@ IF(CMAKE_VERSION VERSION_EQUAL   "2.8.8" OR
     IF(WIN32)
         SET(INSTALL_CONFIGDIR cmake)
     ELSE()
-        SET(INSTALL_CONFIGDIR lib${LIB_POSTFIX}/cmake/OpenSceneGraph)
+        SET(INSTALL_CONFIGDIR ${OSG_INSTALL_LIBDIR}/cmake/OpenSceneGraph)
     ENDIF()
 
     INCLUDE(CMakePackageConfigHelpers)
@@ -942,7 +964,7 @@ ELSE()
 
 ENDIF()
 
-SET(INSTALL_PKGCONFIGDIR lib${LIB_POSTFIX}/pkgconfig)
+SET(INSTALL_PKGCONFIGDIR ${OSG_INSTALL_LIBDIR}/pkgconfig)
 
 # Here we apparently do some funky stuff with making the bin/ and lib/
 # folders which is probably needed to work around a very old CMake bug?
@@ -1305,7 +1327,7 @@ IF(REQUIRES_LIBPATH_MESSAGE)
     IF (NOT OSG_LIBPATH_MESSAGE_HAS_BEEN_RUN_BEFORE)
         SET(OSG_LIBPATH_MESSAGE_HAS_BEEN_RUN_BEFORE 1 CACHE INTERNAL "Flag to track whether the libpath message has been reported before")
 
-        MESSAGE("\nThe build system is configured to install libraries to ${CMAKE_INSTALL_PREFIX}/lib${LIB_POSTFIX}\n"
+        MESSAGE("\nThe build system is configured to install libraries to ${CMAKE_INSTALL_PREFIX}/${OSG_INSTALL_LIBDIR}\n"
             "Your applications may not be able to find your installed libraries unless you:\n"
             "    set your LD_LIBRARY_PATH (user specific) or\n"
             "    update your ld.so configuration (system wide)")
@@ -1327,12 +1349,12 @@ IF(REQUIRES_LIBPATH_MESSAGE)
             IF(EXISTS /etc/ld.so.conf)
                 MESSAGE("You have an ld.so.conf file in /etc, if you wish to ensure \n"
                 "that applications find the installed osg libraries, system wide, you\n"
-                "could add ${CMAKE_INSTALL_PREFIX}/lib${LIB_POSTFIX} to it.")
+                "could add ${CMAKE_INSTALL_PREFIX}/${OSG_INSTALL_LIBDIR} to it.")
             ENDIF()
         ENDIF()
 
         # emit a message during installation.
-        INSTALL(CODE "MESSAGE(\"Libraries were installed to ${CMAKE_INSTALL_PREFIX}lib${LIB_POSTFIX}.\\nYou may need to update your ld.so configuration. \")")
+        INSTALL(CODE "MESSAGE(\"Libraries were installed to ${CMAKE_INSTALL_PREFIX}${OSG_INSTALL_LIBDIR}.\\nYou may need to update your ld.so configuration. \")")
 
     ENDIF(NOT OSG_LIBPATH_MESSAGE_HAS_BEEN_RUN_BEFORE)
 
